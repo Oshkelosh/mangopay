@@ -1,0 +1,9 @@
+{
+  "addon_id": "mangopay",
+  "addon_name": "Mangopay",
+  "addon_description": "Accept payments via Mangopay.",
+  "category": "payment",
+  "version": "1.0.0",
+  "min_oshkelosh_version": "0.1.0",
+  "python_requires": ">=3.11"
+}
