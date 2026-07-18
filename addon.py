@@ -6,14 +6,20 @@ Collects card pay-ins and handles payment webhooks.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Mapping
 
 import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, SecretStr
 
 from app.addons.payments.base import PaymentAddon
-from app.addons.payments.helpers import effective_redirect_url, extract_order_id, mock_checkout
+from app.addons.payments.helpers import (
+    create_payment_error,
+    effective_redirect_url,
+    extract_order_id,
+    mock_checkout,
+    verify_paid_via_refetch,
+)
 from schemas.payment import PaymentWebhookOutcome
 from app.addons.log import info, warning
 from app.addons.config_serialization import dump_addon_config
@@ -186,7 +192,7 @@ class MangopayAddon(PaymentAddon):
             }
         except Exception as exc:
             warning("Mangopay", "create_payment error: {}", exc)
-            return mock_checkout("mangopay", order_id, amount, currency)
+            return create_payment_error("mangopay", exc, order_id)
 
     async def confirm_payment(self, payment_id: str) -> Dict[str, Any]:
         status = await self.get_payment_status(payment_id)
@@ -245,6 +251,29 @@ class MangopayAddon(PaymentAddon):
 
     def webhook_signature_header(self) -> str:
         return "x-mangopay-signature"
+
+    async def verify_webhook(
+        self,
+        *,
+        headers: Mapping[str, str],
+        body: bytes,
+    ) -> bool:
+        """Verify a Mangopay webhook by re-fetching the referenced payin."""
+        del headers
+        import json
+
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except Exception:
+            return False
+        outcome = await self.parse_webhook(payload, "")
+        if not outcome.mark_paid:
+            return outcome.handled
+        return await verify_paid_via_refetch(
+            self.get_payment_status,
+            outcome.payment_id or "",
+            {"succeeded"},
+        )
 
     async def parse_webhook(
         self, payload: Dict[str, Any], signature: str
